@@ -33,17 +33,29 @@ def load_triplets(path: str | Path) -> pd.DataFrame:
 
 
 def load_song_id_list(path: str | Path) -> list[str]:
-    """Load kaggle_songs.txt — canonical list of song_ids."""
-    # File format is usually "1 SOAAADD12A8C13D8C7" — one-indexed line number + song_id.
-    # We just want the song_id column.
+    """Load kaggle_songs.txt — canonical list of song_ids.
+
+    Each line pairs a song_id with its integer index, in EITHER order
+    ("SOAAADD12A8C13D8C7 1" or "1 SOAAADD12A8C13D8C7"). We pick whichever
+    token is non-numeric as the song_id, so column order doesn't matter — the
+    old digit-on-first-token heuristic silently returned whole lines when the
+    song_id came first, which broke downstream `song_id.isin(...)` matches.
+    """
+    song_ids: list[str] = []
     with open(path) as f:
-        first = f.readline().strip().split()
-    if len(first) == 2 and first[0].isdigit():
-        df = pd.read_csv(path, sep=r"\s+", header=None, names=["idx", "song_id"])
-        return df.song_id.tolist()
-    # fallback: one id per line
-    with open(path) as f:
-        return [line.strip() for line in f if line.strip()]
+        for line in f:
+            parts = line.split()
+            if not parts:
+                continue
+            if len(parts) == 1:
+                song_ids.append(parts[0])
+                continue
+            a, b = parts[0], parts[1]
+            if a.isdigit() and not b.isdigit():
+                song_ids.append(b)          # "1 SOxxx" -> SOxxx
+            else:
+                song_ids.append(a)          # "SOxxx 1" (or ambiguous) -> SOxxx
+    return song_ids
 
 
 def load_user_list(path: str | Path) -> list[str]:
