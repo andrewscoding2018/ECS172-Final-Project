@@ -210,6 +210,38 @@ def retrieval_recall(candidates_by_user: dict, truth_by_user: dict) -> float:
     return hits / total if total else 0.0
 
 
+# ---------------------------------------------------------------------------
+# Leaderboard reference (only meaningful for the OFFICIAL valid/test split)
+# ---------------------------------------------------------------------------
+
+# Approximate MSD Challenge (Year 1) MAP@500 anchors, for interpreting a score
+# produced on the official year1_test split. These are rough reference points
+# gathered from the Kaggle final leaderboard / McFee et al. write-ups — public
+# sources vary slightly, so treat them as ballpark (±), not exact targets.
+MSD_LEADERBOARD_MAP500 = {
+    "winner (Aiolli, memory-based CF)": 0.179,
+    "popularity baseline":             0.020,
+    "random":                          0.000,
+}
+
+
+def compare_to_leaderboard(map_score: float, k: int = 500) -> None:
+    """Print an aligned MAP@k next to approximate MSD Challenge anchors.
+
+    Only meaningful when `map_score` was computed on the official year1_test
+    visible/hidden split over the full catalog — otherwise the comparison is
+    apples-to-oranges (see load_eval_user_inputs / the official-eval notebook
+    section). The anchors are approximate; don't over-read small gaps.
+    """
+    print(f"\nMAP@{k} vs MSD Challenge — approximate reference anchors:")
+    for name, ref in MSD_LEADERBOARD_MAP500.items():
+        rel = f"{map_score / ref:>5.2f}x of this" if ref > 0 else "    —"
+        print(f"  {name:36s} {ref:.4f}   ({rel})")
+    print(f"  {'>>> your aligned MAP@' + str(k):36s} {map_score:.4f}")
+    print("  note: protocol-comparable; exact-leaderboard only if scored on the "
+          "FULL test set, full catalog.")
+
+
 def capture_efficiency(achieved_metric: float, ceiling_recall: float) -> float:
     """What fraction of the achievable score did the ranker actually capture?
 

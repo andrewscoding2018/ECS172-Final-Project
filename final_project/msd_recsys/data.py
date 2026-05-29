@@ -52,6 +52,31 @@ def load_user_list(path: str | Path) -> list[str]:
         return [line.strip() for line in f if line.strip()]
 
 
+def load_song_index_map(path: str | Path) -> dict[str, int]:
+    """Load kaggle_songs.txt as {song_id: integer_index}.
+
+    The MSD Challenge submission lists each recommendation by its integer song
+    index (1-based) from this file, not the raw song_id. The file has two
+    whitespace-separated columns; this is order-agnostic — it detects which
+    column is the integer index and which is the song_id.
+    """
+    mapping: dict[str, int] = {}
+    with open(path) as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) != 2:
+                continue
+            a, b = parts
+            if a.isdigit():
+                song_id, idx = b, int(a)
+            elif b.isdigit():
+                song_id, idx = a, int(b)
+            else:
+                continue
+            mapping[song_id] = idx
+    return mapping
+
+
 def load_song_to_track(path: str | Path) -> pd.DataFrame:
     """Load taste_profile_song_to_tracks.txt — song_id -> track_id mapping.
 
@@ -197,3 +222,56 @@ def build_user_item_matrix(
 def histories_from_df(df: pd.DataFrame) -> dict[str, list[str]]:
     """Return {user_id: [song_id, ...]} from an interaction frame."""
     return df.groupby("user_id")["song_id"].apply(list).to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Official MSD Challenge evaluation split
+# ---------------------------------------------------------------------------
+
+def load_eval_user_inputs(
+    visible: pd.DataFrame,
+    hidden: pd.DataFrame,
+    *,
+    restrict_users_to: set[str] | None = None,
+) -> tuple[list[str], list[list[str]], dict[str, set[str]], dict[str, set[str]]]:
+    """Turn an official visible/hidden triplet pair into the structures the
+    retrieval + eval stages expect.
+
+    The MSD Challenge gives every evaluation user a *visible* slice of their
+    listening history (the model's input) and a *hidden* slice (the held-out
+    ground truth scored by MAP@500). Unlike `holdout_split`, this is the real
+    challenge split — using it makes our MAP@500 comparable to the leaderboard.
+    The mapping is:
+
+        histories[i]    = visible songs for users[i]   -> retrieval profile + features
+        owned[users[i]] = same visible songs           -> exclude_owned at rank time
+        truth[users[i]] = hidden songs                 -> MAP@500 ground truth
+
+    Only users present in BOTH files are kept: a user with no hidden plays can't
+    be scored, and a user with no visible plays has an empty retrieval profile.
+
+    Args:
+        visible: triplets from year1_{valid,test}_triplets_visible.txt
+        hidden:  triplets from year1_{valid,test}_triplets_hidden.txt
+        restrict_users_to: optional set of user_ids to keep — e.g. the users that
+            actually have a row (and therefore factors) in the ALS matrix. Pass
+            `set(user_to_ix)` to drop users ALS can't score.
+
+    Returns:
+        users:     list[user_id], stable-sorted.
+        histories: list[list[song_id]] aligned with `users` (visible plays).
+        owned:     {user_id: set[song_id]} visible plays, for exclude_owned.
+        truth:     {user_id: set[song_id]} hidden plays, for MAP@500.
+    """
+    vis_by_user = visible.groupby("user_id")["song_id"].apply(list)
+    hid_by_user = hidden.groupby("user_id")["song_id"].apply(set)
+
+    common = set(vis_by_user.index) & set(hid_by_user.index)
+    if restrict_users_to is not None:
+        common &= restrict_users_to
+    users = sorted(common)
+
+    histories = [list(vis_by_user[u]) for u in users]
+    owned = {u: set(vis_by_user[u]) for u in users}
+    truth = {u: set(hid_by_user[u]) for u in users}
+    return users, histories, owned, truth
